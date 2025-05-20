@@ -11,7 +11,6 @@ const sentiment = new Sentiment();
 
 // Bot state
 let isBotActive = true;
-let whatsappClient = null;
 
 // Bot personality and responses
 const botPersonality = {
@@ -41,143 +40,43 @@ function getRandomResponse(responses) {
 }
 
 // Initialize WhatsApp client
-async function initializeWhatsApp() {
-    if (whatsappClient) return whatsappClient;
+const whatsappClient = new Client({
+    authStrategy: new LocalAuth(),
+    puppeteer: {
+        headless: true,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu',
+            '--disable-extensions',
+            '--disable-default-apps',
+            '--disable-translate',
+            '--disable-sync',
+            '--disable-background-networking',
+            '--metrics-recording-only',
+            '--mute-audio',
+            '--no-default-browser-check',
+            '--safebrowsing-disable-auto-update'
+        ],
+        ignoreDefaultArgs: ['--disable-extensions'],
+        executablePath: puppeteer.executablePath()
+    }
+});
 
-    whatsappClient = new Client({
-        authStrategy: new LocalAuth(),
-        puppeteer: {
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--disable-gpu',
-                '--disable-extensions',
-                '--disable-default-apps',
-                '--disable-translate',
-                '--disable-sync',
-                '--disable-background-networking',
-                '--metrics-recording-only',
-                '--mute-audio',
-                '--no-default-browser-check',
-                '--safebrowsing-disable-auto-update'
-            ],
-            ignoreDefaultArgs: ['--disable-extensions'],
-            executablePath: puppeteer.executablePath()
-        }
-    });
+// Generate QR code
+whatsappClient.on('qr', (qr) => {
+    qrcode.generate(qr, { small: true });
+    console.log('QR Code generated. Scan it with WhatsApp to login.');
+});
 
-    // Generate QR code
-    whatsappClient.on('qr', (qr) => {
-        qrcode.generate(qr, { small: true });
-        console.log('QR Code generated. Scan it with WhatsApp to login.');
-    });
-
-    // When client is ready
-    whatsappClient.on('ready', () => {
-        console.log('Client is ready!');
-    });
-
-    // Handle incoming messages
-    whatsappClient.on('message', async (message) => {
-        if (!isBotActive) return;
-
-        const content = message.body.toLowerCase();
-        
-        // Check for bot control commands
-        if (content === 'sahil bot stop') {
-            isBotActive = false;
-            await message.reply('👋 Bot is now inactive. Sahil will respond manually.');
-            return;
-        }
-        
-        if (content === 'sahil bot start done') {
-            isBotActive = true;
-            await message.reply('🌟 Bot is now active and ready to chat! How can I help you today?');
-            return;
-        }
-
-        // Check if message is a mention in group
-        const isGroup = message.from.endsWith('@g.us');
-        const isMentioned = message.mentionedIds && message.mentionedIds.includes(whatsappClient.info.wid._serialized);
-
-        if (isGroup && !isMentioned) return;
-
-        let thinkingMsg = null;
-        let retryCount = 0;
-        const maxRetries = 3;
-
-        while (retryCount < maxRetries) {
-            try {
-                console.log('Received message:', message.body);
-                
-                // Send thinking message with random friendly text
-                if (!thinkingMsg) {
-                    thinkingMsg = await message.reply(getRandomResponse(botPersonality.thinking));
-                    console.log('Sent thinking message');
-                } else {
-                    await thinkingMsg.edit(`🔄 Retrying... (Attempt ${retryCount + 1}/${maxRetries})`);
-                }
-
-                // Analyze sentiment
-                const sentimentResult = sentiment.analyze(message.body);
-                const emoji = isRomanticMessage(message.body) ? getRomanticEmoji() : getEmojiForSentiment(sentimentResult.score);
-                console.log('Sentiment analysis complete:', { score: sentimentResult.score, emoji });
-
-                // Get ChatGPT response with timeout
-                console.log('Proceeding to get ChatGPT response...');
-                const response = await Promise.race([
-                    getChatGPTResponse(message.body),
-                    new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error('Response timeout')), 15000)
-                    )
-                ]);
-
-                console.log('Got response from ChatGPT:', response);
-
-                if (!response || response.trim() === '') {
-                    throw new Error('Empty response from ChatGPT');
-                }
-
-                // Edit the thinking message with the actual response
-                const finalResponse = `${response}\n${emoji}`;
-                console.log('Sending final response:', finalResponse);
-                await thinkingMsg.edit(finalResponse);
-                console.log('Response sent successfully');
-                break; // Success, exit the retry loop
-
-            } catch (error) {
-                console.error(`Error in message handling (Attempt ${retryCount + 1}/${maxRetries}):`, error);
-                retryCount++;
-
-                if (retryCount >= maxRetries) {
-                    const errorMessage = getRandomResponse(botPersonality.error);
-                    if (thinkingMsg) {
-                        await thinkingMsg.edit(errorMessage);
-                    } else {
-                        await message.reply(errorMessage);
-                    }
-                } else {
-                    // Wait before retrying
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                }
-            }
-        }
-    });
-
-    // Handle connection status
-    whatsappClient.on('disconnected', () => {
-        console.log('Client disconnected');
-    });
-
-    // Initialize the client
-    await whatsappClient.initialize();
-    return whatsappClient;
-}
+// When client is ready
+whatsappClient.on('ready', () => {
+    console.log('Client is ready!');
+});
 
 // Function to get emoji based on sentiment
 function getEmojiForSentiment(score) {
@@ -273,13 +172,97 @@ async function getChatGPTResponse(message, retryCount = 0) {
     }
 }
 
-// Export the initialization function for Vercel
-export default async function handler(req, res) {
-    try {
-        const client = await initializeWhatsApp();
-        res.status(200).json({ status: 'WhatsApp bot is running' });
-    } catch (error) {
-        console.error('Error initializing WhatsApp client:', error);
-        res.status(500).json({ error: 'Failed to initialize WhatsApp client' });
+// Handle incoming messages
+whatsappClient.on('message', async (message) => {
+    if (!isBotActive) return;
+
+    const content = message.body.toLowerCase();
+    
+    // Check for bot control commands
+    if (content === 'sahil bot stop') {
+        isBotActive = false;
+        await message.reply('👋 Bot is now inactive. Sahil will respond manually.');
+        return;
     }
-}
+    
+    if (content === 'sahil bot start done') {
+        isBotActive = true;
+        await message.reply('🌟 Bot is now active and ready to chat! How can I help you today?');
+        return;
+    }
+
+    // Check if message is a mention in group
+    const isGroup = message.from.endsWith('@g.us');
+    const isMentioned = message.mentionedIds && message.mentionedIds.includes(whatsappClient.info.wid._serialized);
+
+    if (isGroup && !isMentioned) return;
+
+    let thinkingMsg = null;
+    let retryCount = 0;
+    const maxRetries = 3;
+
+    while (retryCount < maxRetries) {
+        try {
+            console.log('Received message:', message.body);
+            
+            // Send thinking message with random friendly text
+            if (!thinkingMsg) {
+                thinkingMsg = await message.reply(getRandomResponse(botPersonality.thinking));
+                console.log('Sent thinking message');
+            } else {
+                await thinkingMsg.edit(`🔄 Retrying... (Attempt ${retryCount + 1}/${maxRetries})`);
+            }
+
+            // Analyze sentiment
+            const sentimentResult = sentiment.analyze(message.body);
+            const emoji = isRomanticMessage(message.body) ? getRomanticEmoji() : getEmojiForSentiment(sentimentResult.score);
+            console.log('Sentiment analysis complete:', { score: sentimentResult.score, emoji });
+
+            // Get ChatGPT response with timeout
+            console.log('Proceeding to get ChatGPT response...');
+            const response = await Promise.race([
+                getChatGPTResponse(message.body),
+                new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Response timeout')), 15000)
+                )
+            ]);
+
+            console.log('Got response from ChatGPT:', response);
+
+            if (!response || response.trim() === '') {
+                throw new Error('Empty response from ChatGPT');
+            }
+
+            // Edit the thinking message with the actual response
+            const finalResponse = `${response}\n${emoji}`;
+            console.log('Sending final response:', finalResponse);
+            await thinkingMsg.edit(finalResponse);
+            console.log('Response sent successfully');
+            break; // Success, exit the retry loop
+
+        } catch (error) {
+            console.error(`Error in message handling (Attempt ${retryCount + 1}/${maxRetries}):`, error);
+            retryCount++;
+
+            if (retryCount >= maxRetries) {
+                const errorMessage = getRandomResponse(botPersonality.error);
+                if (thinkingMsg) {
+                    await thinkingMsg.edit(errorMessage);
+                } else {
+                    await message.reply(errorMessage);
+                }
+            } else {
+                // Wait before retrying
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
+    }
+});
+
+// Handle connection status
+whatsappClient.on('disconnected', () => {
+    console.log('Client disconnected');
+});
+
+// Initialize the client
+whatsappClient.initialize();
