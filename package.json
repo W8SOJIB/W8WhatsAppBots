@@ -1,23 +1,21 @@
 {
   "name": "whatsapp-bot",
   "version": "1.0.0",
-  "description": "WhatsApp bot with ChatGPT integration",
+  "description": "WhatsApp Bot with ChatGPT integration",
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node index.js",
-    "dev": "vercel dev",
-    "deploy": "vercel deploy --prod"
+    "start": "node index.js"
   },
   "dependencies": {
     "dotenv": "^16.0.3",
     "node-fetch": "^3.3.0",
-    "puppeteer": "^19.7.0",
+    "puppeteer": "^21.0.0",
     "qrcode-terminal": "^0.12.0",
     "sentiment": "^5.0.2",
-    "whatsapp-web.js": "^1.19.4"
+    "whatsapp-web.js": "^1.23.0"
   },
-  "devDependencies": {
-    "vercel": "^28.0.0"
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
